@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Fabric.js TextFreeForm Example</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.0/fabric.min.js"></script>
+    <script src="./TextFreeForm.js"></script>
+    <style>
+      *, *::before, *::after { box-sizing: border-box; }
+      body { font-family: Arial, sans-serif; margin: 0; padding: 0; display: flex; flex-direction: column; align-items: center; background: #f5f7fa; color: #333; }
+      h1 { margin: 24px 0 4px; font-size: 22px; }
+      p.desc { margin: 0 0 4px; font-size: 14px; color: #666; }
+      #canvas-wrapper { position: relative; display: inline-block; margin-top: 16px; }
+      #canvas-wrapper canvas { display: block; border: 1px solid #ccc; }
+      #overlay { position: absolute; top: 0; left: 0; pointer-events: none; overflow: visible; }
+      .g-anchor { cursor: grab; pointer-events: all; } .g-anchor:active { cursor: grabbing; }
+      .g-ctrl   { cursor: grab; pointer-events: all; } .g-ctrl:active   { cursor: grabbing; }
+      .panel { display: flex; flex-wrap: wrap; justify-content: center; gap: 20px; margin-top: 24px; max-width: 920px; padding: 20px; background: #fff; border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); margin-bottom: 40px; }
+      .form-group { display: flex; flex-direction: column; min-width: 150px; }
+      .form-group label { margin-bottom: 6px; font-size: 14px; font-weight: 500; }
+      .form-group input, .form-group select { padding: 6px 10px; font-size: 14px; border: 1px solid #ccc; border-radius: 4px; transition: border 0.2s; }
+      .form-group input:focus, .form-group select:focus { border-color: #007bff; outline: none; }
+      .btn-primary { padding: 10px 20px; font-size: 15px; font-weight: bold; background: #007bff; color: #fff; border: none; border-radius: 6px; cursor: pointer; transition: background 0.2s; margin-top: 10px; }
+      .btn-primary:hover { background: #0056b3; }
+      .btn-secondary { padding: 10px 20px; font-size: 15px; font-weight: bold; background: #f0f4ff; color: #0056b3; border: 1px solid #b0c4ff; border-radius: 6px; cursor: pointer; transition: background 0.2s; margin-top: 10px; }
+      .btn-secondary:hover { background: #d8e6ff; } .btn-secondary.active { background: #dbeafe; border-color: #3b82f6; color: #1d4ed8; }
+    </style>
+  </head>
+  <body>
+    <h1>TextFreeForm</h1>
+    <p class="desc">Envelope / mesh-warp — text is stretched through a 4-edge Bézier mesh. Drag the handles to reshape.</p>
+    <div id="canvas-wrapper">
+      <canvas id="c" width="800" height="500"></canvas>
+      <svg id="overlay" width="800" height="500"></svg>
+    </div>
+    <div class="panel">
+      <div class="form-group"><label for="text-input">Text</label><input type="text" id="text-input" value="WARP" /></div>
+      <div class="form-group"><label for="fill-input">Fill Color</label><input type="color" id="fill-input" value="#000080" /></div>
+      <div class="form-group"><label for="font-size-input">Font Size</label><input type="number" id="font-size-input" value="120" min="8" max="400" /></div>
+      <div class="form-group"><label for="font-family-input">Font Family</label>
+        <select id="font-family-input"><option>Arial</option><option>Verdana</option><option>Courier New</option><option>Georgia</option><option>Impact</option></select></div>
+      <div class="form-group"><label for="kerning-input">Kerning</label><input type="number" id="kerning-input" value="0" min="-40" max="100" /></div>
+      <div class="form-group"><label>&nbsp;</label><button class="btn-primary" id="update-btn">Apply</button></div>
+      <div class="form-group"><label>&nbsp;</label><button class="btn-secondary" id="toggle-pts-btn">Edit Control Points</button></div>
+    </div>
+    <script>
+      const canvas = new fabric.Canvas('c');
+      const overlayEl = document.getElementById('overlay');
+      const obj = new fabric.TextFreeForm('WARP', {
+        left:400,top:280,originX:'center',originY:'center',
+        fill:'#000080',fontSize:120,fontFamily:'Arial',kerning:0,
+        editable:true,objectCaching:false,hasControls:true,
+      });
+      canvas.add(obj); canvas.setActiveObject(obj);
+
+      document.getElementById('update-btn').addEventListener('click', function () {
+        obj.set({ text:document.getElementById('text-input').value, fill:document.getElementById('fill-input').value, fontSize:parseInt(document.getElementById('font-size-input').value), fontFamily:document.getElementById('font-family-input').value, kerning:parseInt(document.getElementById('kerning-input').value) });
+        canvas.renderAll(); drawOverlay();
+      });
+
+      const NS='http://www.w3.org/2000/svg';
+      const svgEl=(tag,a)=>{const el=document.createElementNS(NS,tag);if(a)for(const[k,v]of Object.entries(a))el.setAttribute(k,v);return el;};
+
+      function localOrigin(){
+        if(!obj._W||!obj._H)return null;
+        const c=obj.getCenterPoint();
+        return{ox:c.x-(obj._bbX||0),oy:c.y-(obj._bbY||0),W:obj._W,H:obj._H};
+      }
+
+      let overlayActive=false;
+      function drawOverlay(){
+        overlayEl.innerHTML='';if(!overlayActive||obj.isEditing)return;
+        const lo=localOrigin();if(!lo)return;
+        const{ox,oy,W,H}=lo, pts=obj.ctrlPts;
+        const p=pts.map(pt=>({x:ox+pt.x*W,y:oy+pt.y*H}));
+
+        // Closed envelope outline
+        const envPath=
+          `M${p[0].x} ${p[0].y} `+
+          `C${p[0].x} ${p[0].y} ${p[6].x} ${p[6].y} ${p[1].x} ${p[1].y} `+
+          `C${p[7].x} ${p[7].y} ${p[2].x} ${p[2].y} ${p[2].x} ${p[2].y} `+
+          `L${p[3].x} ${p[3].y} `+
+          `C${p[3].x} ${p[3].y} ${p[9].x} ${p[9].y} ${p[4].x} ${p[4].y} `+
+          `C${p[8].x} ${p[8].y} ${p[5].x} ${p[5].y} ${p[5].x} ${p[5].y} Z`;
+        overlayEl.appendChild(svgEl('path',{d:envPath,fill:'#4f96ff0a',stroke:'#4f96ff','stroke-width':'1.5','stroke-dasharray':'5 3',opacity:'.85'}));
+
+        [[1,6],[1,7],[4,8],[4,9]].forEach(([a,b])=>
+          overlayEl.appendChild(svgEl('line',{x1:p[a].x,y1:p[a].y,x2:p[b].x,y2:p[b].y,stroke:'#b06fff','stroke-width':'1',opacity:'.65'})));
+
+        pts.forEach((pt,i)=>{
+          const{x,y}=p[i];const isAnchor=i<6;
+          const g=svgEl('g',{class:isAnchor?'g-anchor':'g-ctrl'});
+          if(isAnchor){g.appendChild(svgEl('circle',{cx:x,cy:y,r:8,fill:'#4f96ff',stroke:'#fff','stroke-width':'2.5'}));}
+          else{g.appendChild(svgEl('circle',{cx:x,cy:y,r:6,fill:'none',stroke:'#b06fff','stroke-width':'2'}));g.appendChild(svgEl('circle',{cx:x,cy:y,r:2.5,fill:'#b06fff'}));}
+          makeDraggable(g,(dx,dy)=>{
+            const newPts=obj.ctrlPts.map((q,j)=>j===i?{x:q.x+dx/W,y:q.y+dy/H}:{x:q.x,y:q.y});
+            obj.set({ctrlPts:newPts});canvas.renderAll();drawOverlay();
+          });
+          overlayEl.appendChild(g);
+        });
+      }
+
+      function makeDraggable(el,onDelta){el.addEventListener('mousedown',e=>{e.preventDefault();e.stopPropagation();let px=e.clientX,py=e.clientY;const move=e=>{onDelta(e.clientX-px,e.clientY-py);px=e.clientX;py=e.clientY;};const up=()=>{document.removeEventListener('mousemove',move);document.removeEventListener('mouseup',up);};document.addEventListener('mousemove',move);document.addEventListener('mouseup',up);});}
+
+      canvas.on('object:moving',e=>{if(e.target===obj)drawOverlay();});
+      canvas.on('object:modified',e=>{if(e.target===obj)drawOverlay();});
+      obj.on('editing:entered',()=>{overlayEl.innerHTML='';});
+      obj.on('editing:exited',()=>{if(overlayActive)obj.set({hasBorders:false,hasControls:false});drawOverlay();});
+      document.getElementById('toggle-pts-btn').addEventListener('click',function(){overlayActive=!overlayActive;this.classList.toggle('active',overlayActive);this.textContent=overlayActive?'Hide Control Points':'Edit Control Points';obj.set({hasBorders:!overlayActive,hasControls:!overlayActive});canvas.requestRenderAll();if(overlayActive)drawOverlay();else overlayEl.innerHTML='';});
+    </script>
+  </body>
+</html>
